@@ -205,6 +205,20 @@ createDebugUtilsMessenger(vk::UniqueInstance &instance) {
                                                  &debugUtilsMessengerCallback));
 }
 
+uint32_t findGraphicsQueueFamilyIndex(
+        const std::vector<vk::QueueFamilyProperties> &queueFamilyProperties) {
+    // get the first index into queue family properties which support graphics
+    size_t graphicsQueueFamilyIndex = std::distance(
+            queueFamilyProperties.begin(),
+            std::find_if(
+                    queueFamilyProperties.begin(), queueFamilyProperties.end(),
+                    [](const vk::QueueFamilyProperties &qfp) {
+                        return qfp.queueFlags & vk::QueueFlagBits::eGraphics;
+                    }));
+    assert(graphicsQueueFamilyIndex < queueFamilyProperties.size());
+    return static_cast<uint32_t>(graphicsQueueFamilyIndex);
+}
+
 vk::UniqueDevice
 createDevice(vk::PhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
              const std::vector<std::string> &extensions = {},
@@ -240,19 +254,8 @@ int main() {
         vk::PhysicalDevice physicalDevice =
                 instance->enumeratePhysicalDevices().front();
 
-        std::vector<vk::QueueFamilyProperties> queueFamilyProperties =
-                physicalDevice.getQueueFamilyProperties();
-
-        // get the first index into queue family properties which support graphics
-        size_t graphicsQueueFamilyIndex = std::distance(
-                queueFamilyProperties.begin(),
-                std::find_if(queueFamilyProperties.begin(),
-                             queueFamilyProperties.end(),
-                             [](const vk::QueueFamilyProperties &qfp) {
-                                 return qfp.queueFlags &
-                                        vk::QueueFlagBits::eGraphics;
-                             }));
-        assert(graphicsQueueFamilyIndex < queueFamilyProperties.size());
+        uint32_t graphicsQueueFamilyIndex = findGraphicsQueueFamilyIndex(
+                physicalDevice.getQueueFamilyProperties());
 
         vk::UniqueDevice device =
                 createDevice(physicalDevice, graphicsQueueFamilyIndex);
