@@ -1,8 +1,5 @@
 #include <iostream>
 
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 
 #include <vulkan/vulkan.hpp>
@@ -10,6 +7,9 @@
 #if (VULKAN_HPP_DISPATCH_LOADER_DYNAMIC == 1)
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #endif
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>// GLFW should be included after vulkan
 
 const char *const kAppName = "Light";
 const char *const kEngineName = "Vulkan";
@@ -53,7 +53,17 @@ Window::~Window() noexcept { glfwDestroyWindow(window); }
 
 #pragma endregion
 
-#pragma region utils
+#pragma region math utils
+
+template<typename T>
+VULKAN_HPP_INLINE constexpr const T &clamp(const T &v, const T &low,
+                                           const T &height) {
+    return v < low ? low : height < v ? height : v;
+}
+
+#pragma endregion
+
+#pragma region vulkan utils
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -341,8 +351,57 @@ int main() {
         vk::PhysicalDevice physicalDevice =
                 instance->enumeratePhysicalDevices().front();
 
-        uint32_t graphicsQueueFamilyIndex = findGraphicsQueueFamilyIndex(
-                physicalDevice.getQueueFamilyProperties());
+        auto queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+
+        uint32_t graphicsQueueFamilyIndex =
+                findGraphicsQueueFamilyIndex(queueFamilyProperties);
+
+        Window window = createWindow(kAppName, {kWidth, kHeight});
+
+        vk::UniqueSurfaceKHR surface;
+        VkSurfaceKHR surf;
+        glfwCreateWindowSurface(instance.get(), window.window, nullptr, &surf);
+        vk::ObjectDestroy<vk::Instance, VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
+                deleter(instance.get());
+        surface = vk::UniqueSurfaceKHR(surf, deleter);
+
+        // determine a queue family that supports present
+        // first check if the graphics queue family is good enough
+        size_t presentQueueFamilyIndex =
+                physicalDevice.getSurfaceSupportKHR(
+                        static_cast<uint32_t>(graphicsQueueFamilyIndex),
+                        surface.get())
+                        ? graphicsQueueFamilyIndex
+                        : queueFamilyProperties.size();
+        if (presentQueueFamilyIndex == queueFamilyProperties.size()) {
+            // the graphics queue doesn't support present, look for an other
+            // family that supports both graphics and present
+            for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+                if ((queueFamilyProperties[i].queueFlags &
+                     vk::QueueFlagBits::eGraphics) &&
+                    physicalDevice.getSurfaceSupportKHR(i, surface.get())) {
+                    graphicsQueueFamilyIndex = i;
+                    presentQueueFamilyIndex = i;
+                    break;
+                }
+            }
+            if (presentQueueFamilyIndex == queueFamilyProperties.size()) {
+                // there's nothing like a single family index that supports both
+                // graphics and present, look for an other family that supports
+                // present
+                for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+                    if (physicalDevice.getSurfaceSupportKHR(i, surface.get())) {
+                        presentQueueFamilyIndex = i;
+                        break;
+                    }
+                }
+            }
+        }
+        if ((graphicsQueueFamilyIndex == queueFamilyProperties.size()) ||
+            (presentQueueFamilyIndex == queueFamilyProperties.size())) {
+            throw std::runtime_error("could not find a queue for graphics or "
+                                     "present");
+        }
 
         vk::UniqueDevice device =
                 createDevice(physicalDevice, graphicsQueueFamilyIndex,
@@ -360,7 +419,96 @@ int main() {
                                       vk::CommandBufferLevel::ePrimary, 1))
                         .front());
 
-        Window window = createWindow(kAppName, {kWidth, kHeight});
+        // get the supported surface formats
+        std::vector<vk::SurfaceFormatKHR> formats =
+                physicalDevice.getSurfaceFormatsKHR(surface.get());
+        assert(!formats.empty());
+        vk::Format format = (formats[0].format == vk::Format::eUndefined)
+                                    ? vk::Format::eB8G8R8A8Unorm
+                                    : formats[0].format;
+
+        vk::SurfaceCapabilitiesKHR surfaceCapabilities =
+                physicalDevice.getSurfaceCapabilitiesKHR(surface.get());
+        VkExtent2D swapchainExtent;
+        if (surfaceCapabilities.currentExtent.width ==
+            std::numeric_limits<uint32_t>::max()) {
+            // if the surface size is undefined, the size is set to the size of
+            // the images requested
+            swapchainExtent.width =
+                    clamp(kWidth, surfaceCapabilities.minImageExtent.width,
+                          surfaceCapabilities.maxImageExtent.width);
+            swapchainExtent.height =
+                    clamp(kHeight, surfaceCapabilities.minImageExtent.height,
+                          surfaceCapabilities.maxImageExtent.height);
+        } else {
+            // if the surface size is defined, the swap chain size must match
+            swapchainExtent = surfaceCapabilities.currentExtent;
+        }
+
+        // FIFO present mode is guaranteed by the spec to be supported
+        vk::PresentModeKHR swapchainPresentMode = vk::PresentModeKHR::eFifo;
+
+        vk::SurfaceTransformFlagBitsKHR transform =
+                (surfaceCapabilities.supportedTransforms &
+                 vk::SurfaceTransformFlagBitsKHR::eIdentity)
+                        ? vk::SurfaceTransformFlagBitsKHR::eIdentity
+                        : surfaceCapabilities.currentTransform;
+
+        vk::CompositeAlphaFlagBitsKHR compositeAlpha =
+                (surfaceCapabilities.supportedCompositeAlpha &
+                 vk::CompositeAlphaFlagBitsKHR::ePreMultiplied)
+                        ? vk::CompositeAlphaFlagBitsKHR::ePreMultiplied
+                : (surfaceCapabilities.supportedCompositeAlpha &
+                   vk::CompositeAlphaFlagBitsKHR::ePostMultiplied)
+                        ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied
+                : (surfaceCapabilities.supportedCompositeAlpha &
+                   vk::CompositeAlphaFlagBitsKHR::eInherit)
+                        ? vk::CompositeAlphaFlagBitsKHR::eInherit
+                        : vk::CompositeAlphaFlagBitsKHR::eOpaque;
+
+        vk::SwapchainCreateInfoKHR swapchainCreateInfo(
+                vk::SwapchainCreateFlagsKHR(), surface.get(),
+                surfaceCapabilities.minImageCount, format,
+                vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1,
+                vk::ImageUsageFlagBits::eColorAttachment,
+                vk::SharingMode::eExclusive, {}, transform, compositeAlpha,
+                swapchainPresentMode, true, nullptr);
+
+        if (graphicsQueueFamilyIndex != presentQueueFamilyIndex) {
+            // if the graphics and present queues are from different queue
+            // families, we either have to explicitly transfer ownership of
+            // images between the queues, or we have to create the swapchain
+            // with imageSharingMode as VK_SHARING_MODE_CONCURRENT
+
+            uint32_t queueFamilyIndices[2] = {
+                    static_cast<uint32_t>(graphicsQueueFamilyIndex),
+                    static_cast<uint32_t>(presentQueueFamilyIndex)};
+
+            swapchainCreateInfo.imageSharingMode = vk::SharingMode::eConcurrent;
+            swapchainCreateInfo.queueFamilyIndexCount = 2;
+            swapchainCreateInfo.pQueueFamilyIndices = queueFamilyIndices;
+        }
+
+        vk::UniqueSwapchainKHR swapchain =
+                device->createSwapchainKHRUnique(swapchainCreateInfo);
+
+        std::vector<vk::Image> swapchainImages =
+                device->getSwapchainImagesKHR(swapchain.get());
+
+        std::vector<vk::UniqueImageView> imageViews;
+        imageViews.reserve(swapchainImages.size());
+        vk::ComponentMapping componentMapping(
+                vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG,
+                vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA);
+        vk::ImageSubresourceRange subresourceRange(
+                vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+        for (const auto &image : swapchainImages) {
+            vk::ImageViewCreateInfo imageViewCreateInfo(
+                    vk::ImageViewCreateFlags(), image, vk::ImageViewType::e2D,
+                    format, componentMapping, subresourceRange);
+            imageViews.push_back(
+                    device->createImageViewUnique(imageViewCreateInfo));
+        }
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
