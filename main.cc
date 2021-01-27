@@ -259,6 +259,18 @@ int main() {
 
         vk::UniqueDevice device =
                 createDevice(physicalDevice, graphicsQueueFamilyIndex);
+
+        // create a command pool to allocate a command buffer from
+        vk::UniqueCommandPool commandPool = device->createCommandPoolUnique(
+                vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlags(),
+                                          graphicsQueueFamilyIndex));
+        // allocate command buffer from the command pool
+        vk::UniqueCommandBuffer commandBuffer = std::move(
+                device->allocateCommandBuffersUnique(
+                              vk::CommandBufferAllocateInfo(
+                                      commandPool.get(),
+                                      vk::CommandBufferLevel::ePrimary, 1))
+                        .front());
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
