@@ -216,6 +216,8 @@ int main() {
                 createDebugUtilsMessenger(instance);
 #endif
 
+        vk::PhysicalDevice physicalDevice =
+                instance->enumeratePhysicalDevices().front();
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
