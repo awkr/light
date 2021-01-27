@@ -13,8 +13,47 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 const char *const kAppName = "Light";
 const char *const kEngineName = "Vulkan";
+const uint32_t kWidth = 64;
+const uint32_t kHeight = 64;
 
-// ======= utils begin =======
+#pragma region classes
+
+struct GlfwContext {
+    bool initialized{false};
+
+    GlfwContext() {
+        glfwSetErrorCallback([](int err, const char *msg) {
+            std::cerr << "glfw: (" << err << ") " << msg << std::endl;
+        });
+        if (initialized = static_cast<bool>(glfwInit()); !initialized) {
+            throw std::runtime_error("glfw init error");
+        }
+    }
+
+    ~GlfwContext() {
+        if (initialized) { glfwTerminate(); }
+    }
+};
+
+struct Window {
+    Window(GLFWwindow *window, const std::string &name,
+           const vk::Extent2D &extent);
+    ~Window() noexcept;
+
+    GLFWwindow *window;
+    std::string name;
+    vk::Extent2D extent;
+};
+
+Window::Window(GLFWwindow *window, const std::string &name,
+               const vk::Extent2D &extent)
+    : window(window), name(name), extent(extent) {}
+
+Window::~Window() noexcept { glfwDestroyWindow(window); }
+
+#pragma endregion
+
+#pragma region utils
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -135,6 +174,23 @@ createInstance(const std::string &appName, const std::string &engineName,
         enabledExtensions.push_back(ext.data());
     }
 
+    // register glfw required instance extensions (this needs glfwInit() first)
+    uint32_t glfwExtensionCount{0};
+    auto glfwExtensions =
+            glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    assert(glfwExtensionCount > 0);
+    for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
+        auto ext = glfwExtensions[i];
+        if (std::find(extensions.begin(), extensions.end(), ext) ==
+                    extensions.end() &&
+            std::find_if(extensionProperties.begin(), extensionProperties.end(),
+                         [ext](const auto &ep) {
+                             return strcmp(ext, ep.extensionName) == 0;
+                         }) != extensionProperties.end()) {
+            enabledExtensions.push_back(ext);
+        }
+    }
+
 #if !defined(NDEBUG)
     // in debug mode, use the following instance extensions
     std::vector<std::string> instanceDebugExtensions = {
@@ -219,6 +275,16 @@ uint32_t findGraphicsQueueFamilyIndex(
     return static_cast<uint32_t>(graphicsQueueFamilyIndex);
 }
 
+std::vector<std::string> getInstanceExtensions() {
+    std::vector<std::string> extensions;
+    extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    return extensions;
+}
+
+std::vector<std::string> getDeviceExtensions() {
+    return {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+}
+
 vk::UniqueDevice
 createDevice(vk::PhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
              const std::vector<std::string> &extensions = {},
@@ -240,12 +306,25 @@ createDevice(vk::PhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
     return physicalDevice.createDeviceUnique(deviceCreateInfo);
 }
 
-// ======= utils end =======
+Window createWindow(const std::string &windowName, const vk::Extent2D &extent) {
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_VISIBLE, true);
+    glfwWindowHint(GLFW_RESIZABLE, true);
+    GLFWwindow *w = glfwCreateWindow(extent.width, extent.height,
+                                     windowName.c_str(), nullptr, nullptr);
+    if (!w) { throw std::runtime_error("glfw create window error"); }
+    return Window(w, windowName, extent);
+}
+
+#pragma endregion
 
 int main() {
     try {
+        static auto glfwCtx = GlfwContext();
+
         vk::UniqueInstance instance =
-                createInstance(kAppName, kEngineName, 1, 1, VK_API_VERSION_1_2);
+                createInstance(kAppName, kEngineName, 1, 1, VK_API_VERSION_1_2,
+                               {}, getInstanceExtensions());
 #ifndef NDEBUG
         vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger =
                 createDebugUtilsMessenger(instance);
@@ -258,7 +337,8 @@ int main() {
                 physicalDevice.getQueueFamilyProperties());
 
         vk::UniqueDevice device =
-                createDevice(physicalDevice, graphicsQueueFamilyIndex);
+                createDevice(physicalDevice, graphicsQueueFamilyIndex,
+                             getDeviceExtensions());
 
         // create a command pool to allocate a command buffer from
         vk::UniqueCommandPool commandPool = device->createCommandPoolUnique(
@@ -271,6 +351,8 @@ int main() {
                                       commandPool.get(),
                                       vk::CommandBufferLevel::ePrimary, 1))
                         .front());
+
+        Window window = createWindow(kAppName, {kWidth, kHeight});
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
