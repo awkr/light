@@ -205,6 +205,27 @@ createDebugUtilsMessenger(vk::UniqueInstance &instance) {
                                                  &debugUtilsMessengerCallback));
 }
 
+vk::UniqueDevice
+createDevice(vk::PhysicalDevice physicalDevice, uint32_t queueFamilyIndex,
+             const std::vector<std::string> &extensions = {},
+             const vk::PhysicalDeviceFeatures *physicalDeviceFeatures = nullptr,
+             const void *next = nullptr) {
+    std::vector<const char *> enabledExtensions;
+    enabledExtensions.reserve(extensions.size());
+    for (const auto &ext : extensions) {
+        enabledExtensions.push_back(ext.c_str());
+    }
+
+    float queuePriority = 0.0f;
+    vk::DeviceQueueCreateInfo deviceQueueCreateInfo(
+            vk::DeviceQueueCreateFlags(), queueFamilyIndex, 1, &queuePriority);
+    vk::DeviceCreateInfo deviceCreateInfo(
+            vk::DeviceCreateFlags(), deviceQueueCreateInfo, {},
+            enabledExtensions, physicalDeviceFeatures);
+    deviceCreateInfo.pNext = next;
+    return physicalDevice.createDeviceUnique(deviceCreateInfo);
+}
+
 // ======= utils end =======
 
 int main() {
@@ -218,6 +239,23 @@ int main() {
 
         vk::PhysicalDevice physicalDevice =
                 instance->enumeratePhysicalDevices().front();
+
+        std::vector<vk::QueueFamilyProperties> queueFamilyProperties =
+                physicalDevice.getQueueFamilyProperties();
+
+        // get the first index into queue family properties which support graphics
+        size_t graphicsQueueFamilyIndex = std::distance(
+                queueFamilyProperties.begin(),
+                std::find_if(queueFamilyProperties.begin(),
+                             queueFamilyProperties.end(),
+                             [](const vk::QueueFamilyProperties &qfp) {
+                                 return qfp.queueFlags &
+                                        vk::QueueFlagBits::eGraphics;
+                             }));
+        assert(graphicsQueueFamilyIndex < queueFamilyProperties.size());
+
+        vk::UniqueDevice device =
+                createDevice(physicalDevice, graphicsQueueFamilyIndex);
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
