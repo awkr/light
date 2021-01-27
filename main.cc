@@ -285,6 +285,43 @@ uint32_t findGraphicsQueueFamilyIndex(
     return static_cast<uint32_t>(graphicsQueueFamilyIndex);
 }
 
+std::pair<uint32_t, uint32_t>
+findGraphicsAndPresentQueueFamilyIndex(vk::PhysicalDevice physicalDevice,
+                                       const VkSurfaceKHR &surface) {
+    auto queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+
+    uint32_t graphicsQueueFamilyIndex =
+            findGraphicsQueueFamilyIndex(queueFamilyProperties);
+
+    // determine a queue family that supports present
+    // first check if the graphics queue family is good enough
+    if (physicalDevice.getSurfaceSupportKHR(graphicsQueueFamilyIndex,
+                                            surface)) {
+        return std::make_pair(graphicsQueueFamilyIndex,
+                              graphicsQueueFamilyIndex);
+    }
+
+    // the graphics queue doesn't support present, look for an other
+    // family that supports both graphics and present
+    for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+        if ((queueFamilyProperties[i].queueFlags &
+             vk::QueueFlagBits::eGraphics) &&
+            physicalDevice.getSurfaceSupportKHR(i, surface)) {
+            return std::make_pair(i, i);
+        }
+    }
+    // there's nothing like a single family index that supports both
+    // graphics and present, look for an other family that supports
+    // present
+    for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
+        if (physicalDevice.getSurfaceSupportKHR(i, surface)) {
+            return std::make_pair(graphicsQueueFamilyIndex, i);
+        }
+    }
+    throw std::runtime_error("could not find a queue for graphics or "
+                             "present");
+}
+
 std::vector<std::string> getInstanceExtensions() {
     std::vector<std::string> extensions;
     extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
@@ -336,6 +373,29 @@ Window createWindow(const std::string &windowName, const vk::Extent2D &extent) {
 
 #pragma endregion
 
+struct Surface {
+    vk::Extent2D extent;
+    Window window;
+    vk::UniqueSurfaceKHR surface;
+
+    Surface(vk::UniqueInstance &instance, const std::string &windowName,
+            const vk::Extent2D &extent);
+};
+
+Surface::Surface(vk::UniqueInstance &instance, const std::string &windowName,
+                 const vk::Extent2D &extent)
+    : extent(extent), window(createWindow(windowName, extent)) {
+    VkSurfaceKHR surf;
+    if (VkResult r = glfwCreateWindowSurface(instance.get(), window.window,
+                                             nullptr, &surf);
+        r != VK_SUCCESS) {
+        throw std::runtime_error("glfw create window surface error");
+    }
+    vk::ObjectDestroy<vk::Instance, VULKAN_HPP_DEFAULT_DISPATCHER_TYPE> deleter(
+            instance.get());
+    surface = vk::UniqueSurfaceKHR(surf, deleter);
+}
+
 int main() {
     try {
         static auto glfwCtx = GlfwContext();
@@ -351,57 +411,11 @@ int main() {
         vk::PhysicalDevice physicalDevice =
                 instance->enumeratePhysicalDevices().front();
 
-        auto queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
+        Surface surface(instance, kAppName, {kWidth, kHeight});
 
-        uint32_t graphicsQueueFamilyIndex =
-                findGraphicsQueueFamilyIndex(queueFamilyProperties);
-
-        Window window = createWindow(kAppName, {kWidth, kHeight});
-
-        vk::UniqueSurfaceKHR surface;
-        VkSurfaceKHR surf;
-        glfwCreateWindowSurface(instance.get(), window.window, nullptr, &surf);
-        vk::ObjectDestroy<vk::Instance, VULKAN_HPP_DEFAULT_DISPATCHER_TYPE>
-                deleter(instance.get());
-        surface = vk::UniqueSurfaceKHR(surf, deleter);
-
-        // determine a queue family that supports present
-        // first check if the graphics queue family is good enough
-        size_t presentQueueFamilyIndex =
-                physicalDevice.getSurfaceSupportKHR(
-                        static_cast<uint32_t>(graphicsQueueFamilyIndex),
-                        surface.get())
-                        ? graphicsQueueFamilyIndex
-                        : queueFamilyProperties.size();
-        if (presentQueueFamilyIndex == queueFamilyProperties.size()) {
-            // the graphics queue doesn't support present, look for an other
-            // family that supports both graphics and present
-            for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
-                if ((queueFamilyProperties[i].queueFlags &
-                     vk::QueueFlagBits::eGraphics) &&
-                    physicalDevice.getSurfaceSupportKHR(i, surface.get())) {
-                    graphicsQueueFamilyIndex = i;
-                    presentQueueFamilyIndex = i;
-                    break;
-                }
-            }
-            if (presentQueueFamilyIndex == queueFamilyProperties.size()) {
-                // there's nothing like a single family index that supports both
-                // graphics and present, look for an other family that supports
-                // present
-                for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
-                    if (physicalDevice.getSurfaceSupportKHR(i, surface.get())) {
-                        presentQueueFamilyIndex = i;
-                        break;
-                    }
-                }
-            }
-        }
-        if ((graphicsQueueFamilyIndex == queueFamilyProperties.size()) ||
-            (presentQueueFamilyIndex == queueFamilyProperties.size())) {
-            throw std::runtime_error("could not find a queue for graphics or "
-                                     "present");
-        }
+        const auto &[graphicsQueueFamilyIndex, presentQueueFamilyIndex] =
+                findGraphicsAndPresentQueueFamilyIndex(physicalDevice,
+                                                       *surface.surface);
 
         vk::UniqueDevice device =
                 createDevice(physicalDevice, graphicsQueueFamilyIndex,
@@ -421,14 +435,14 @@ int main() {
 
         // get the supported surface formats
         std::vector<vk::SurfaceFormatKHR> formats =
-                physicalDevice.getSurfaceFormatsKHR(surface.get());
+                physicalDevice.getSurfaceFormatsKHR(*surface.surface);
         assert(!formats.empty());
         vk::Format format = (formats[0].format == vk::Format::eUndefined)
                                     ? vk::Format::eB8G8R8A8Unorm
                                     : formats[0].format;
 
         vk::SurfaceCapabilitiesKHR surfaceCapabilities =
-                physicalDevice.getSurfaceCapabilitiesKHR(surface.get());
+                physicalDevice.getSurfaceCapabilitiesKHR(*surface.surface);
         VkExtent2D swapchainExtent;
         if (surfaceCapabilities.currentExtent.width ==
             std::numeric_limits<uint32_t>::max()) {
@@ -467,7 +481,7 @@ int main() {
                         : vk::CompositeAlphaFlagBitsKHR::eOpaque;
 
         vk::SwapchainCreateInfoKHR swapchainCreateInfo(
-                vk::SwapchainCreateFlagsKHR(), surface.get(),
+                vk::SwapchainCreateFlagsKHR(), *surface.surface,
                 surfaceCapabilities.minImageCount, format,
                 vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1,
                 vk::ImageUsageFlagBits::eColorAttachment,
