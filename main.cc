@@ -282,7 +282,15 @@ std::vector<std::string> getInstanceExtensions() {
 }
 
 std::vector<std::string> getDeviceExtensions() {
-    return {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    std::vector<std::string> extensions;
+    extensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+#ifndef NDEBUG
+    // debug marker allow the assignment of internal names to Vulkan resources.
+    // these internal names will conveniently be visible in debugger like RenderDoc.
+    // debug marker are only available if RenderDoc is enabled.
+    extensions.emplace_back(VK_EXT_DEBUG_MARKER_EXTENSION_NAME);
+#endif
+    return extensions;
 }
 
 vk::UniqueDevice
