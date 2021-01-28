@@ -465,6 +465,37 @@ vk::UniqueDescriptorSetLayout createDescriptorSetLayout(
             vk::DescriptorSetLayoutCreateInfo(flags, bindings));
 }
 
+vk::SurfaceFormatKHR
+findSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &formats) {
+    assert(!formats.empty());
+    vk::SurfaceFormatKHR pickedFormat = formats[0];
+    if (formats.size() == 1) {
+        if (formats[0].format == vk::Format::eUndefined) {
+            pickedFormat.format = vk::Format::eB8G8R8A8Unorm;
+            pickedFormat.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
+        }
+    } else {// request several formats, the first found will be used
+        vk::Format wantedFormats[] = {
+                vk::Format::eB8G8R8A8Unorm, vk::Format::eR8G8B8A8Unorm,
+                vk::Format::eB8G8R8Unorm, vk::Format::eR8G8B8Unorm};
+        vk::ColorSpaceKHR wantedColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
+        for (const auto &format : wantedFormats) {
+            auto it = std::find_if(
+                    formats.begin(), formats.end(),
+                    [format, wantedColorSpace](vk::SurfaceFormatKHR const &f) {
+                        return (f.format == format) &&
+                               (f.colorSpace == wantedColorSpace);
+                    });
+            if (it != formats.end()) {
+                pickedFormat = *it;
+                break;
+            }
+        }
+    }
+    assert(pickedFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear);
+    return pickedFormat;
+}
+
 #pragma endregion
 
 #pragma region
@@ -568,8 +599,8 @@ int main() {
 
         // get the supported surface formats
         std::vector<vk::SurfaceFormatKHR> formats =
-                physicalDevice.getSurfaceFormatsKHR(*surface.surface);
-        assert(!formats.empty());
+                physicalDevice.getSurfaceFormatsKHR(surface.surface.get());
+        vk::Format colorFormat = findSurfaceFormat(formats).format;
         vk::Format format = (formats[0].format == vk::Format::eUndefined)
                                     ? vk::Format::eB8G8R8A8Unorm
                                     : formats[0].format;
