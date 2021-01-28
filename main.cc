@@ -740,6 +740,34 @@ int main() {
                                        vk::DescriptorType::eUniformBuffer, {},
                                        descriptorBufferInfo),
                 {});
+
+        // 10 init render pass
+        std::array<vk::AttachmentDescription, 2> attachmentDescriptions;
+        attachmentDescriptions[0] = vk::AttachmentDescription(
+                vk::AttachmentDescriptionFlags(), colorFormat,
+                vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
+                vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare,
+                vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::ePresentSrcKHR);
+        attachmentDescriptions[1] = vk::AttachmentDescription(
+                vk::AttachmentDescriptionFlags(), depthFormat,
+                vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
+                vk::AttachmentStoreOp::eDontCare,
+                vk::AttachmentLoadOp::eDontCare,
+                vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
+        vk::AttachmentReference colorReference(
+                0, vk::ImageLayout::eColorAttachmentOptimal);
+        vk::AttachmentReference depthReference(
+                1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+        vk::SubpassDescription subpass(vk::SubpassDescriptionFlags(),
+                                       vk::PipelineBindPoint::eGraphics, {},
+                                       colorReference, {}, &depthReference);
+
+        vk::UniqueRenderPass renderPass = device->createRenderPassUnique(
+                vk::RenderPassCreateInfo(vk::RenderPassCreateFlags(),
+                                         attachmentDescriptions, subpass));
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
