@@ -718,6 +718,28 @@ int main() {
         vk::UniquePipelineLayout pipelineLayout =
                 device->createPipelineLayoutUnique(vk::PipelineLayoutCreateInfo(
                         vk::PipelineLayoutCreateFlags(), *descriptorSetLayout));
+
+        // create a descriptor pool
+        vk::DescriptorPoolSize poolSize(vk::DescriptorType::eUniformBuffer, 1);
+        vk::UniqueDescriptorPool descriptorPool =
+                device->createDescriptorPoolUnique(vk::DescriptorPoolCreateInfo(
+                        vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1,
+                        poolSize));
+
+        // allocate a descriptor set
+        vk::UniqueDescriptorSet descriptorSet = std::move(
+                device->allocateDescriptorSetsUnique(
+                              vk::DescriptorSetAllocateInfo(
+                                      *descriptorPool, *descriptorSetLayout))
+                        .front());
+
+        vk::DescriptorBufferInfo descriptorBufferInfo(
+                uniformBuffer.buffer.get(), 0, sizeof(glm::mat4x4));
+        device->updateDescriptorSets(
+                vk::WriteDescriptorSet(descriptorSet.get(), 0, 0,
+                                       vk::DescriptorType::eUniformBuffer, {},
+                                       descriptorBufferInfo),
+                {});
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
