@@ -691,6 +691,22 @@ int main() {
                              vk::BufferUsageFlagBits::eUniformBuffer);
         copyToDevice(device, uniformBuffer.deviceMemory,
                      createModelViewProjectionClipMatrix(vk::Extent2D(0, 0)));
+
+        // init pipeline
+        // create a DescriptorSetLayout
+        vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(
+                0, vk::DescriptorType::eUniformBuffer, 1,
+                vk::ShaderStageFlagBits::eVertex);
+        vk::UniqueDescriptorSetLayout descriptorSetLayout =
+                device->createDescriptorSetLayoutUnique(
+                        vk::DescriptorSetLayoutCreateInfo(
+                                vk::DescriptorSetLayoutCreateFlags(),
+                                descriptorSetLayoutBinding));
+
+        // create a PipelineLayout using that DescriptorSetLayout
+        vk::UniquePipelineLayout pipelineLayout =
+                device->createPipelineLayoutUnique(vk::PipelineLayoutCreateInfo(
+                        vk::PipelineLayoutCreateFlags(), *descriptorSetLayout));
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
