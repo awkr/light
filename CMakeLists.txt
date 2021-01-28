@@ -12,6 +12,13 @@ if (NOT glfw3_FOUND)
     message(FATAL_ERROR "glfw3 not found")
 endif ()
 
+find_package(glm REQUIRED)
+if (NOT glm_FOUND)
+    message(FATAL_ERROR "glm not found")
+else()
+    include_directories(${GLM_INCLUDE_DIRS})
+endif ()
+
 add_executable(light main.cc)
 
 target_link_libraries(
