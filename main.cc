@@ -450,6 +450,21 @@ void copyToDevice(const vk::UniqueDevice &device,
     copyToDevice<T>(device, memory, &data, 1);
 }
 
+vk::UniqueDescriptorSetLayout createDescriptorSetLayout(
+        const vk::UniqueDevice &device,
+        const std::vector<std::tuple<vk::DescriptorType, uint32_t,
+                                     vk::ShaderStageFlags>> &metadata,
+        vk::DescriptorSetLayoutCreateFlags flags = {}) {
+    std::vector<vk::DescriptorSetLayoutBinding> bindings(metadata.size());
+    for (size_t i = 0; i < metadata.size(); ++i) {
+        bindings[i] = vk::DescriptorSetLayoutBinding(
+                static_cast<uint32_t>(i), std::get<0>(metadata[i]),
+                std::get<1>(metadata[i]), std::get<2>(metadata[i]));
+    }
+    return device->createDescriptorSetLayoutUnique(
+            vk::DescriptorSetLayoutCreateInfo(flags, bindings));
+}
+
 #pragma endregion
 
 #pragma region
@@ -694,14 +709,10 @@ int main() {
 
         // init pipeline
         // create a DescriptorSetLayout
-        vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(
-                0, vk::DescriptorType::eUniformBuffer, 1,
-                vk::ShaderStageFlagBits::eVertex);
         vk::UniqueDescriptorSetLayout descriptorSetLayout =
-                device->createDescriptorSetLayoutUnique(
-                        vk::DescriptorSetLayoutCreateInfo(
-                                vk::DescriptorSetLayoutCreateFlags(),
-                                descriptorSetLayoutBinding));
+                createDescriptorSetLayout(
+                        device, {{vk::DescriptorType::eUniformBuffer, 1,
+                                  vk::ShaderStageFlagBits ::eVertex}});
 
         // create a PipelineLayout using that DescriptorSetLayout
         vk::UniquePipelineLayout pipelineLayout =
