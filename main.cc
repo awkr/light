@@ -11,6 +11,9 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>// GLFW should be included after vulkan
 
+#define GLM_FORCE_RADIANS
+#include <glm/gtc/matrix_transform.hpp>
+
 const char *const kAppName = "Light";
 const char *const kEngineName = "Vulkan";
 const uint32_t kWidth = 64;
@@ -583,6 +586,45 @@ int main() {
                         vk::ImageViewCreateFlags(), depthImage.get(),
                         vk::ImageViewType::e2D, depthFormat, componentMapping,
                         subResourceRange));
+
+        // init uniform buffer
+        glm::mat4x4 model = glm::mat4x4(1.0f);
+        glm::mat4x4 view = glm::lookAt(glm::vec3(-5.0f, 3.0f, -10.0f),
+                                       glm::vec3(0.0f, 0.0f, 0.0f),
+                                       glm::vec3(0.0f, -1.0f, 0.0f));
+        glm::mat4x4 projection =
+                glm::perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        // vulkan clip space has inverted y and half z
+        // clang-format off
+        glm::mat4x4 clip = glm::mat4x4(
+                1.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, -1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f,0.5f, 0.0f,
+                0.0f, 0.0f, 0.5f,1.0f);
+        // clang-format on
+
+        glm::mat4x4 mvpc = clip * projection * view * model;
+
+        vk::UniqueBuffer uniformDataBuffer = device->createBufferUnique(
+                vk::BufferCreateInfo(vk::BufferCreateFlags(), sizeof(mvpc),
+                                     vk::BufferUsageFlagBits::eUniformBuffer));
+
+        memoryRequirements =
+                device->getBufferMemoryRequirements(uniformDataBuffer.get());
+        typeIndex = findMemoryType(
+                memoryProperties, memoryRequirements.memoryTypeBits,
+                vk::MemoryPropertyFlagBits::eHostVisible |
+                        vk::MemoryPropertyFlagBits::eHostCoherent);
+        vk::UniqueDeviceMemory uniformDataMemory = device->allocateMemoryUnique(
+                vk::MemoryAllocateInfo(memoryRequirements.size, typeIndex));
+
+        auto *data = static_cast<uint8_t *>(device->mapMemory(
+                uniformDataMemory.get(), 0, memoryRequirements.size));
+        memcpy(data, &mvpc, sizeof(mvpc));
+        device->unmapMemory(uniformDataMemory.get());
+
+        device->bindBufferMemory(uniformDataBuffer.get(),
+                                 uniformDataMemory.get(), 0);
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
