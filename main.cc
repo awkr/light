@@ -390,7 +390,69 @@ findMemoryType(vk::PhysicalDeviceMemoryProperties const &memoryProperties,
     return typeIndex;
 }
 
+vk::UniqueDeviceMemory
+allocateMemory(const vk::UniqueDevice &device,
+               const vk::PhysicalDeviceMemoryProperties &memoryProperties,
+               const vk::MemoryRequirements &memoryRequirements,
+               vk::MemoryPropertyFlags memoryPropertyFlags) {
+    uint32_t memoryTypeIndex =
+            findMemoryType(memoryProperties, memoryRequirements.memoryTypeBits,
+                           memoryPropertyFlags);
+    return device->allocateMemoryUnique(
+            vk::MemoryAllocateInfo(memoryRequirements.size, memoryTypeIndex));
+}
+
+glm::mat4x4 createModelViewProjectionClipMatrix(const vk::Extent2D &extent) {
+    float fov = glm::radians(45.0f);
+    if (extent.width > extent.height) {
+        fov *= static_cast<float>(extent.height) /
+               static_cast<float>(extent.width);
+    }
+
+    glm::mat4x4 model = glm::mat4x4(1.0f);
+    glm::mat4x4 view = glm::lookAt(glm::vec3(-5.0f, 3.0f, -10.0f),
+                                   glm::vec3(0.0f, 0.0f, 0.0f),
+                                   glm::vec3(0.0f, -1.0f, 0.0f));
+    glm::mat4x4 projection = glm::perspective(fov, 1.0f, 0.1f, 100.0f);
+    // vulkan clip space has inverted y and half z
+    // clang-format off
+    glm::mat4x4 clip = glm::mat4x4(
+            1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, -1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f,0.5f, 0.0f,
+            0.0f, 0.0f, 0.5f,1.0f);
+    // clang-format on
+
+    return clip * projection * view * model;
+}
+
+template<typename T>
+void copyToDevice(const vk::UniqueDevice &device,
+                  const vk::UniqueDeviceMemory &memory, const T *data,
+                  size_t size, vk::DeviceSize stride = sizeof(T)) {
+    assert(sizeof(T) <= stride);
+    uint8_t *deviceData = static_cast<uint8_t *>(
+            device->mapMemory(memory.get(), 0, size * stride));
+    if (stride == sizeof(T)) {
+        memcpy(deviceData, data, size * sizeof(T));
+    } else {
+        for (size_t i = 0; i < size; ++i) {
+            memcpy(deviceData, &data[i], sizeof(T));
+            deviceData += stride;
+        }
+    }
+    device->unmapMemory(memory.get());
+}
+
+template<typename T>
+void copyToDevice(const vk::UniqueDevice &device,
+                  const vk::UniqueDeviceMemory &memory, const T &data) {
+    copyToDevice<T>(device, memory, &data, 1);
+}
+
 #pragma endregion
+
+#pragma region
 
 struct Surface {
     vk::Extent2D extent;
@@ -414,6 +476,43 @@ Surface::Surface(vk::UniqueInstance &instance, const std::string &windowName,
             instance.get());
     surface = vk::UniqueSurfaceKHR(surf, deleter);
 }
+
+struct Buffer {
+    Buffer(const vk::PhysicalDevice &physicalDevice,
+           const vk::UniqueDevice &device, vk::DeviceSize size,
+           vk::BufferUsageFlags usage,
+           vk::MemoryPropertyFlags propertyFlags =
+                   vk::MemoryPropertyFlagBits::eHostVisible |
+                   vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    vk::UniqueBuffer buffer;
+    vk::UniqueDeviceMemory deviceMemory;
+
+#ifndef NDEBUG
+private:
+    vk::DeviceSize size;
+    vk::BufferUsageFlags usage;
+    vk::MemoryPropertyFlags propertyFlags;
+#endif
+};
+
+Buffer::Buffer(const vk::PhysicalDevice &physicalDevice,
+               const vk::UniqueDevice &device, vk::DeviceSize size,
+               vk::BufferUsageFlags usage,
+               vk::MemoryPropertyFlags propertyFlags)
+#ifndef NDEBUG
+    : size(size), usage(usage), propertyFlags(propertyFlags)
+#endif
+{
+    buffer = device->createBufferUnique(
+            vk::BufferCreateInfo(vk::BufferCreateFlags(), size, usage));
+    deviceMemory = allocateMemory(
+            device, physicalDevice.getMemoryProperties(),
+            device->getBufferMemoryRequirements(buffer.get()), propertyFlags);
+    device->bindBufferMemory(buffer.get(), deviceMemory.get(), 0);
+}
+
+#pragma endregion
 
 int main() {
     try {
@@ -588,43 +687,10 @@ int main() {
                         subResourceRange));
 
         // init uniform buffer
-        glm::mat4x4 model = glm::mat4x4(1.0f);
-        glm::mat4x4 view = glm::lookAt(glm::vec3(-5.0f, 3.0f, -10.0f),
-                                       glm::vec3(0.0f, 0.0f, 0.0f),
-                                       glm::vec3(0.0f, -1.0f, 0.0f));
-        glm::mat4x4 projection =
-                glm::perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
-        // vulkan clip space has inverted y and half z
-        // clang-format off
-        glm::mat4x4 clip = glm::mat4x4(
-                1.0f, 0.0f, 0.0f, 0.0f,
-                0.0f, -1.0f, 0.0f, 0.0f,
-                0.0f, 0.0f,0.5f, 0.0f,
-                0.0f, 0.0f, 0.5f,1.0f);
-        // clang-format on
-
-        glm::mat4x4 mvpc = clip * projection * view * model;
-
-        vk::UniqueBuffer uniformDataBuffer = device->createBufferUnique(
-                vk::BufferCreateInfo(vk::BufferCreateFlags(), sizeof(mvpc),
-                                     vk::BufferUsageFlagBits::eUniformBuffer));
-
-        memoryRequirements =
-                device->getBufferMemoryRequirements(uniformDataBuffer.get());
-        typeIndex = findMemoryType(
-                memoryProperties, memoryRequirements.memoryTypeBits,
-                vk::MemoryPropertyFlagBits::eHostVisible |
-                        vk::MemoryPropertyFlagBits::eHostCoherent);
-        vk::UniqueDeviceMemory uniformDataMemory = device->allocateMemoryUnique(
-                vk::MemoryAllocateInfo(memoryRequirements.size, typeIndex));
-
-        auto *data = static_cast<uint8_t *>(device->mapMemory(
-                uniformDataMemory.get(), 0, memoryRequirements.size));
-        memcpy(data, &mvpc, sizeof(mvpc));
-        device->unmapMemory(uniformDataMemory.get());
-
-        device->bindBufferMemory(uniformDataBuffer.get(),
-                                 uniformDataMemory.get(), 0);
+        Buffer uniformBuffer(physicalDevice, device, sizeof(glm::mat4x4),
+                             vk::BufferUsageFlagBits::eUniformBuffer);
+        copyToDevice(device, uniformBuffer.deviceMemory,
+                     createModelViewProjectionClipMatrix(vk::Extent2D(0, 0)));
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
