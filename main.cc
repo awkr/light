@@ -371,6 +371,22 @@ Window createWindow(const std::string &windowName, const vk::Extent2D &extent) {
     return Window(w, windowName, extent);
 }
 
+uint32_t
+findMemoryType(vk::PhysicalDeviceMemoryProperties const &memoryProperties,
+               uint32_t typeBits, vk::MemoryPropertyFlags mask) {
+    auto typeIndex = uint32_t(~0);
+    for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
+        if ((typeBits & 1) &&
+            ((memoryProperties.memoryTypes[i].propertyFlags & mask) == mask)) {
+            typeIndex = i;
+            break;
+        }
+        typeBits >>= 1;
+    }
+    assert(typeIndex != uint32_t(~0));
+    return typeIndex;
+}
+
 #pragma endregion
 
 struct Surface {
@@ -523,6 +539,50 @@ int main() {
             imageViews.push_back(
                     device->createImageViewUnique(imageViewCreateInfo));
         }
+
+        // init depth buffer
+        const vk::Format depthFormat = vk::Format::eD16Unorm;
+        vk::FormatProperties formatProperties =
+                physicalDevice.getFormatProperties(depthFormat);
+
+        vk::ImageTiling tiling;
+        if (formatProperties.linearTilingFeatures &
+            vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
+            tiling = vk::ImageTiling::eLinear;
+        } else if (formatProperties.optimalTilingFeatures &
+                   vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
+            tiling = vk::ImageTiling::eOptimal;
+        } else {
+            throw std::runtime_error("DepthStencilAttachment is not supported "
+                                     "for D16Unorm depth format");
+        }
+        vk::ImageCreateInfo imageCreateInfo(
+                vk::ImageCreateFlags(), vk::ImageType::e2D, depthFormat,
+                vk::Extent3D(surface.extent, 1), 1, 1,
+                vk::SampleCountFlagBits::e1, tiling,
+                vk::ImageUsageFlagBits::eDepthStencilAttachment);
+        vk::UniqueImage depthImage = device->createImageUnique(imageCreateInfo);
+
+        vk::PhysicalDeviceMemoryProperties memoryProperties =
+                physicalDevice.getMemoryProperties();
+        vk::MemoryRequirements memoryRequirements =
+                device->getImageMemoryRequirements(depthImage.get());
+        uint32_t typeBits = memoryRequirements.memoryTypeBits;
+        uint32_t typeIndex = findMemoryType(
+                memoryProperties, memoryRequirements.memoryTypeBits,
+                vk::MemoryPropertyFlagBits::eDeviceLocal);
+        vk::UniqueDeviceMemory depthMemory = device->allocateMemoryUnique(
+                vk::MemoryAllocateInfo(memoryRequirements.size, typeIndex));
+
+        device->bindImageMemory(depthImage.get(), depthMemory.get(), 0);
+
+        vk::ImageSubresourceRange subResourceRange(
+                vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1);
+        vk::UniqueImageView depthView =
+                device->createImageViewUnique(vk::ImageViewCreateInfo(
+                        vk::ImageViewCreateFlags(), depthImage.get(),
+                        vk::ImageViewType::e2D, depthFormat, componentMapping,
+                        subResourceRange));
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
