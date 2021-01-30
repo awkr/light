@@ -12,6 +12,7 @@ if (NOT glfw3_FOUND)
     message(FATAL_ERROR "glfw3 not found")
 endif ()
 
+set(glm_DIR third-party/glm/cmake/glm)
 find_package(glm REQUIRED)
 if (NOT glm_FOUND)
     message(FATAL_ERROR "glm not found")
@@ -26,4 +27,5 @@ target_link_libraries(
     PUBLIC
     Vulkan::Vulkan
     glfw
+    glm::glm
 )
