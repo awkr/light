@@ -42,3 +42,5 @@ target_link_libraries(
     glm::glm
     ${GLSLANG_LIBS}
 )
+
+target_compile_definitions(light PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1)
