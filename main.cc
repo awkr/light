@@ -14,6 +14,8 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 #define GLM_FORCE_RADIANS
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <glslang/SPIRV/GlslangToSpv.h>
+
 const char *const kAppName = "Light";
 const char *const kEngineName = "Vulkan";
 const uint32_t kWidth = 64;
@@ -799,6 +801,9 @@ int main() {
         vk::UniqueRenderPass renderPass = device->createRenderPassUnique(
                 vk::RenderPassCreateInfo(vk::RenderPassCreateFlags(),
                                          attachmentDescriptions, subpass));
+
+        // 11 init shader
+        glslang::InitializeProcess();
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);

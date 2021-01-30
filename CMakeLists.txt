@@ -20,6 +20,9 @@ else()
     include_directories(${GLM_INCLUDE_DIRS})
 endif ()
 
+include_directories(third-party/glslang/include)
+link_directories(third-party/glslang/lib)
+
 add_executable(light main.cc)
 
 target_link_libraries(
@@ -28,4 +31,5 @@ target_link_libraries(
     Vulkan::Vulkan
     glfw
     glm::glm
+    glslang
 )
