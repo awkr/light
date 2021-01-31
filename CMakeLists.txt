@@ -16,12 +16,21 @@ set(glm_DIR third-party/glm/cmake/glm)
 find_package(glm REQUIRED)
 if (NOT glm_FOUND)
     message(FATAL_ERROR "glm not found")
-else()
+else ()
     include_directories(${GLM_INCLUDE_DIRS})
 endif ()
 
 include_directories(third-party/glslang/include)
 link_directories(third-party/glslang/lib)
+set(GLSLANG_LIBS
+    OSDependent
+    GenericCodeGen
+    SPIRV
+    HLSL
+    SPVRemapper
+    MachineIndependent
+    glslang
+    OGLCompiler)
 
 add_executable(light main.cc)
 
@@ -31,5 +40,5 @@ target_link_libraries(
     Vulkan::Vulkan
     glfw
     glm::glm
-    glslang
+    ${GLSLANG_LIBS}
 )
