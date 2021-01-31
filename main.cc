@@ -1116,6 +1116,21 @@ int main() {
                         fragmentShaderModuleCreateInfo);
 
         glslang::FinalizeProcess();
+
+        // 12 init framebuffers
+        std::array<vk::ImageView, 2> attachments;
+        attachments[1] = depthBuffer.imageView.get();
+
+        std::vector<vk::UniqueFramebuffer> framebuffers;
+        framebuffers.reserve(swapchain.imageViews.size());
+        for (const auto &view : swapchain.imageViews) {
+            attachments[0] = view.get();
+            framebuffers.push_back(device->createFramebufferUnique(
+                    vk::FramebufferCreateInfo(vk::FramebufferCreateFlags(),
+                                              renderPass.get(), attachments,
+                                              surface.extent.width,
+                                              surface.extent.height, 1)));
+        }
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
