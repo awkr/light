@@ -724,6 +724,18 @@ bool GLSLtoSPV(const vk::ShaderStageFlagBits shaderStage,
     return true;
 }
 
+vk::UniqueShaderModule createShaderModule(const vk::UniqueDevice &device,
+                                          vk::ShaderStageFlagBits stage,
+                                          const std::string &shaderText) {
+    std::vector<unsigned int> shaderSPV;
+    if (!GLSLtoSPV(stage, shaderText, shaderSPV)) {
+        throw std::runtime_error("could not convert glsl shader to spir-v");
+    }
+
+    return device->createShaderModuleUnique(vk::ShaderModuleCreateInfo(
+            vk::ShaderModuleCreateFlags(), shaderSPV));
+}
+
 vk::UniqueRenderPass createRenderPass(
         const vk::UniqueDevice &device, vk::Format colorFormat,
         vk::Format depthFormat,
@@ -1185,28 +1197,12 @@ int main() {
 
         // 11 init shader
         glslang::InitializeProcess();
-
-        std::vector<unsigned int> vertexShaderSPV;
-        bool ok = GLSLtoSPV(vk::ShaderStageFlagBits::eVertex,
-                            vertexShaderText_PC_C, vertexShaderSPV);
-        assert(ok);
-
-        vk::ShaderModuleCreateInfo vertexShaderModuleCreateInfo(
-                vk::ShaderModuleCreateFlags(), vertexShaderSPV);
-        vk::UniqueShaderModule vertexShaderModule =
-                device->createShaderModuleUnique(vertexShaderModuleCreateInfo);
-
-        std::vector<unsigned int> fragmentShaderSPV;
-        ok = GLSLtoSPV(vk::ShaderStageFlagBits::eFragment,
-                       fragmentShaderText_C_C, fragmentShaderSPV);
-        assert(ok);
-
-        vk::ShaderModuleCreateInfo fragmentShaderModuleCreateInfo(
-                vk::ShaderModuleCreateFlags(), fragmentShaderSPV);
-        vk::UniqueShaderModule fragmentShaderModule =
-                device->createShaderModuleUnique(
-                        fragmentShaderModuleCreateInfo);
-
+        vk::UniqueShaderModule vertShaderModule =
+                createShaderModule(device, vk::ShaderStageFlagBits::eVertex,
+                                   vertexShaderText_PC_C);
+        vk::UniqueShaderModule fragShaderModule =
+                createShaderModule(device, vk::ShaderStageFlagBits::eFragment,
+                                   fragmentShaderText_C_C);
         glslang::FinalizeProcess();
 
         // 12 init framebuffers
