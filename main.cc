@@ -778,6 +778,114 @@ Buffer::Buffer(const vk::PhysicalDevice &physicalDevice,
     device->bindBufferMemory(buffer.get(), deviceMemory.get(), 0);
 }
 
+struct Swapchain {
+    vk::Format colorFormat;
+    vk::UniqueSwapchainKHR swapchain;
+    std::vector<vk::Image> images;
+    std::vector<vk::UniqueImageView> imageViews;
+
+    Swapchain(const vk::PhysicalDevice &physicalDevice,
+              const vk::UniqueDevice &device, const vk::SurfaceKHR &surface,
+              const vk::Extent2D &extent, vk::ImageUsageFlags usage,
+              const vk::UniqueSwapchainKHR &oldSwapchain,
+              uint32_t graphicsQueueFamilyIndex,
+              uint32_t presentQueueFamilyIndex);
+};
+
+Swapchain::Swapchain(const vk::PhysicalDevice &physicalDevice,
+                     const vk::UniqueDevice &device,
+                     const vk::SurfaceKHR &surface, const vk::Extent2D &extent,
+                     vk::ImageUsageFlags usage,
+                     const vk::UniqueSwapchainKHR &oldSwapchain,
+                     uint32_t graphicsQueueFamilyIndex,
+                     uint32_t presentQueueFamilyIndex) {
+    // get the supported surface formats
+    std::vector<vk::SurfaceFormatKHR> formats =
+            physicalDevice.getSurfaceFormatsKHR(surface);
+    colorFormat = findSurfaceFormat(formats).format;
+
+    vk::SurfaceCapabilitiesKHR surfaceCapabilities =
+            physicalDevice.getSurfaceCapabilitiesKHR(surface);
+    VkExtent2D swapchainExtent;
+    if (surfaceCapabilities.currentExtent.width ==
+        std::numeric_limits<uint32_t>::max()) {
+        // if the surface size is undefined, the size is set to the size of
+        // the images requested
+        swapchainExtent.width =
+                clamp(kWidth, surfaceCapabilities.minImageExtent.width,
+                      surfaceCapabilities.maxImageExtent.width);
+        swapchainExtent.height =
+                clamp(kHeight, surfaceCapabilities.minImageExtent.height,
+                      surfaceCapabilities.maxImageExtent.height);
+    } else {
+        // if the surface size is defined, the swap chain size must match
+        swapchainExtent = surfaceCapabilities.currentExtent;
+    }
+
+    // FIFO present mode is guaranteed by the spec to be supported
+    vk::PresentModeKHR swapchainPresentMode = vk::PresentModeKHR::eFifo;
+
+    vk::SurfaceTransformFlagBitsKHR transform =
+            (surfaceCapabilities.supportedTransforms &
+             vk::SurfaceTransformFlagBitsKHR::eIdentity)
+                    ? vk::SurfaceTransformFlagBitsKHR::eIdentity
+                    : surfaceCapabilities.currentTransform;
+
+    vk::CompositeAlphaFlagBitsKHR compositeAlpha =
+            (surfaceCapabilities.supportedCompositeAlpha &
+             vk::CompositeAlphaFlagBitsKHR::ePreMultiplied)
+                    ? vk::CompositeAlphaFlagBitsKHR::ePreMultiplied
+            : (surfaceCapabilities.supportedCompositeAlpha &
+               vk::CompositeAlphaFlagBitsKHR::ePostMultiplied)
+                    ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied
+            : (surfaceCapabilities.supportedCompositeAlpha &
+               vk::CompositeAlphaFlagBitsKHR::eInherit)
+                    ? vk::CompositeAlphaFlagBitsKHR::eInherit
+                    : vk::CompositeAlphaFlagBitsKHR::eOpaque;
+
+    vk::SwapchainCreateInfoKHR swapchainCreateInfo(
+            vk::SwapchainCreateFlagsKHR(), surface,
+            surfaceCapabilities.minImageCount, colorFormat,
+            vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1,
+            vk::ImageUsageFlagBits::eColorAttachment,
+            vk::SharingMode::eExclusive, {}, transform, compositeAlpha,
+            swapchainPresentMode, true, nullptr);
+
+    if (graphicsQueueFamilyIndex != presentQueueFamilyIndex) {
+        // if the graphics and present queues are from different queue
+        // families, we either have to explicitly transfer ownership of
+        // images between the queues, or we have to create the swapchain
+        // with imageSharingMode as VK_SHARING_MODE_CONCURRENT
+
+        uint32_t queueFamilyIndices[2] = {
+                static_cast<uint32_t>(graphicsQueueFamilyIndex),
+                static_cast<uint32_t>(presentQueueFamilyIndex)};
+
+        swapchainCreateInfo.imageSharingMode = vk::SharingMode::eConcurrent;
+        swapchainCreateInfo.queueFamilyIndexCount = 2;
+        swapchainCreateInfo.pQueueFamilyIndices = queueFamilyIndices;
+    }
+
+    swapchain = device->createSwapchainKHRUnique(swapchainCreateInfo);
+
+    std::vector<vk::Image> swapchainImages =
+            device->getSwapchainImagesKHR(swapchain.get());
+
+    imageViews.reserve(swapchainImages.size());
+    vk::ComponentMapping componentMapping(
+            vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG,
+            vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA);
+    vk::ImageSubresourceRange subresourceRange(vk::ImageAspectFlagBits::eColor,
+                                               0, 1, 0, 1);
+    for (const auto &image : swapchainImages) {
+        vk::ImageViewCreateInfo imageViewCreateInfo(
+                vk::ImageViewCreateFlags(), image, vk::ImageViewType::e2D,
+                colorFormat, componentMapping, subresourceRange);
+        imageViews.push_back(
+                device->createImageViewUnique(imageViewCreateInfo));
+    }
+}
+
 #pragma endregion
 
 int main() {
@@ -817,96 +925,13 @@ int main() {
                                       vk::CommandBufferLevel::ePrimary, 1))
                         .front());
 
-        // get the supported surface formats
-        std::vector<vk::SurfaceFormatKHR> formats =
-                physicalDevice.getSurfaceFormatsKHR(surface.surface.get());
-        vk::Format colorFormat = findSurfaceFormat(formats).format;
-        vk::Format format = (formats[0].format == vk::Format::eUndefined)
-                                    ? vk::Format::eB8G8R8A8Unorm
-                                    : formats[0].format;
+        Swapchain swapchain(physicalDevice, device, surface.surface.get(),
+                            surface.extent,
+                            vk::ImageUsageFlagBits::eColorAttachment |
+                                    vk::ImageUsageFlagBits::eTransferSrc,
+                            vk::UniqueSwapchainKHR(), graphicsQueueFamilyIndex,
+                            presentQueueFamilyIndex);
 
-        vk::SurfaceCapabilitiesKHR surfaceCapabilities =
-                physicalDevice.getSurfaceCapabilitiesKHR(*surface.surface);
-        VkExtent2D swapchainExtent;
-        if (surfaceCapabilities.currentExtent.width ==
-            std::numeric_limits<uint32_t>::max()) {
-            // if the surface size is undefined, the size is set to the size of
-            // the images requested
-            swapchainExtent.width =
-                    clamp(kWidth, surfaceCapabilities.minImageExtent.width,
-                          surfaceCapabilities.maxImageExtent.width);
-            swapchainExtent.height =
-                    clamp(kHeight, surfaceCapabilities.minImageExtent.height,
-                          surfaceCapabilities.maxImageExtent.height);
-        } else {
-            // if the surface size is defined, the swap chain size must match
-            swapchainExtent = surfaceCapabilities.currentExtent;
-        }
-
-        // FIFO present mode is guaranteed by the spec to be supported
-        vk::PresentModeKHR swapchainPresentMode = vk::PresentModeKHR::eFifo;
-
-        vk::SurfaceTransformFlagBitsKHR transform =
-                (surfaceCapabilities.supportedTransforms &
-                 vk::SurfaceTransformFlagBitsKHR::eIdentity)
-                        ? vk::SurfaceTransformFlagBitsKHR::eIdentity
-                        : surfaceCapabilities.currentTransform;
-
-        vk::CompositeAlphaFlagBitsKHR compositeAlpha =
-                (surfaceCapabilities.supportedCompositeAlpha &
-                 vk::CompositeAlphaFlagBitsKHR::ePreMultiplied)
-                        ? vk::CompositeAlphaFlagBitsKHR::ePreMultiplied
-                : (surfaceCapabilities.supportedCompositeAlpha &
-                   vk::CompositeAlphaFlagBitsKHR::ePostMultiplied)
-                        ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied
-                : (surfaceCapabilities.supportedCompositeAlpha &
-                   vk::CompositeAlphaFlagBitsKHR::eInherit)
-                        ? vk::CompositeAlphaFlagBitsKHR::eInherit
-                        : vk::CompositeAlphaFlagBitsKHR::eOpaque;
-
-        vk::SwapchainCreateInfoKHR swapchainCreateInfo(
-                vk::SwapchainCreateFlagsKHR(), *surface.surface,
-                surfaceCapabilities.minImageCount, format,
-                vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1,
-                vk::ImageUsageFlagBits::eColorAttachment,
-                vk::SharingMode::eExclusive, {}, transform, compositeAlpha,
-                swapchainPresentMode, true, nullptr);
-
-        if (graphicsQueueFamilyIndex != presentQueueFamilyIndex) {
-            // if the graphics and present queues are from different queue
-            // families, we either have to explicitly transfer ownership of
-            // images between the queues, or we have to create the swapchain
-            // with imageSharingMode as VK_SHARING_MODE_CONCURRENT
-
-            uint32_t queueFamilyIndices[2] = {
-                    static_cast<uint32_t>(graphicsQueueFamilyIndex),
-                    static_cast<uint32_t>(presentQueueFamilyIndex)};
-
-            swapchainCreateInfo.imageSharingMode = vk::SharingMode::eConcurrent;
-            swapchainCreateInfo.queueFamilyIndexCount = 2;
-            swapchainCreateInfo.pQueueFamilyIndices = queueFamilyIndices;
-        }
-
-        vk::UniqueSwapchainKHR swapchain =
-                device->createSwapchainKHRUnique(swapchainCreateInfo);
-
-        std::vector<vk::Image> swapchainImages =
-                device->getSwapchainImagesKHR(swapchain.get());
-
-        std::vector<vk::UniqueImageView> imageViews;
-        imageViews.reserve(swapchainImages.size());
-        vk::ComponentMapping componentMapping(
-                vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG,
-                vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA);
-        vk::ImageSubresourceRange subresourceRange(
-                vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-        for (const auto &image : swapchainImages) {
-            vk::ImageViewCreateInfo imageViewCreateInfo(
-                    vk::ImageViewCreateFlags(), image, vk::ImageViewType::e2D,
-                    format, componentMapping, subresourceRange);
-            imageViews.push_back(
-                    device->createImageViewUnique(imageViewCreateInfo));
-        }
 
         // init depth buffer
         const vk::Format depthFormat = vk::Format::eD16Unorm;
