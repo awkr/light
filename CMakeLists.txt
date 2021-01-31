@@ -23,14 +23,19 @@ endif ()
 include_directories(third-party/glslang/include)
 link_directories(third-party/glslang/lib)
 set(GLSLANG_LIBS
-    OSDependent
     GenericCodeGen
-    SPIRV
-    HLSL
-    SPVRemapper
-    MachineIndependent
     glslang
-    OGLCompiler)
+    HLSL
+    MachineIndependent
+    OGLCompiler
+    OSDependent
+    SPIRV
+    SPIRV-Tools
+    SPIRV-Tools-link
+    SPIRV-Tools-opt
+    SPIRV-Tools-reduce
+    SPIRV-Tools-shared
+    SPVRemapper)
 
 add_executable(light main.cc)
 
