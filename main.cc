@@ -886,6 +886,81 @@ Swapchain::Swapchain(const vk::PhysicalDevice &physicalDevice,
     }
 }
 
+struct Image {
+    vk::Format format;
+    vk::UniqueImage image;
+    vk::UniqueDeviceMemory deviceMemory;
+    vk::UniqueImageView imageView;
+
+    Image(const vk::PhysicalDevice &physicalDevice,
+          const vk::UniqueDevice &device, vk::Format fmt,
+          const vk::Extent2D &extent, vk::ImageTiling tiling,
+          vk::ImageUsageFlags usage, vk::ImageLayout initialLayout,
+          vk::MemoryPropertyFlags memoryProperties,
+          vk::ImageAspectFlags aspectMask);
+};
+
+Image::Image(const vk::PhysicalDevice &physicalDevice,
+             const vk::UniqueDevice &device, vk::Format fmt,
+             const vk::Extent2D &extent, vk::ImageTiling tiling,
+             vk::ImageUsageFlags usage, vk::ImageLayout initialLayout,
+             vk::MemoryPropertyFlags memoryProperties,
+             vk::ImageAspectFlags aspectMask)
+    : format(fmt) {
+    vk::ImageCreateInfo imageCreateInfo(
+            vk::ImageCreateFlags(), vk::ImageType::e2D, format,
+            vk::Extent3D(extent, 1), 1, 1, vk::SampleCountFlagBits::e1, tiling,
+            usage | vk::ImageUsageFlagBits::eSampled,
+            vk::SharingMode::eExclusive, {}, initialLayout);
+    image = device->createImageUnique(imageCreateInfo);
+
+    deviceMemory = allocateMemory(
+            device, physicalDevice.getMemoryProperties(),
+            device->getImageMemoryRequirements(image.get()), memoryProperties);
+
+    device->bindImageMemory(image.get(), deviceMemory.get(), 0);
+
+    vk::ComponentMapping componentMapping(
+            vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG,
+            vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA);
+    vk::ImageSubresourceRange subResourceRange(aspectMask, 0, 1, 0, 1);
+    imageView = device->createImageViewUnique(vk::ImageViewCreateInfo(
+            vk::ImageViewCreateFlags(), image.get(), vk::ImageViewType::e2D,
+            format, componentMapping, subResourceRange));
+}
+
+struct DepthBuffer : public Image {
+    DepthBuffer(const vk::PhysicalDevice &physicalDevice,
+                const vk::UniqueDevice &device, vk::Format format,
+                const vk::Extent2D &extent);
+};
+
+DepthBuffer::DepthBuffer(const vk::PhysicalDevice &physicalDevice,
+                         const vk::UniqueDevice &device, vk::Format format,
+                         const vk::Extent2D &extent)
+    : Image(physicalDevice, device, format, extent, vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eDepthStencilAttachment,
+            vk::ImageLayout::eUndefined,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            vk::ImageAspectFlagBits::eDepth) {
+    // todo how to set image tiling of super class
+
+    //        vk::FormatProperties formatProperties =
+    //                physicalDevice.getFormatProperties(format);
+    //
+    //        vk::ImageTiling tiling;
+    //        if (formatProperties.linearTilingFeatures &
+    //            vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
+    //            tiling = vk::ImageTiling::eLinear;
+    //        } else if (formatProperties.optimalTilingFeatures &
+    //                   vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
+    //            tiling = vk::ImageTiling::eOptimal;
+    //        } else {
+    //            throw std::runtime_error("DepthStencilAttachment is not supported "
+    //                                     "for D16Unorm depth format");
+    //        }
+}
+
 #pragma endregion
 
 int main() {
@@ -932,50 +1007,10 @@ int main() {
                             vk::UniqueSwapchainKHR(), graphicsQueueFamilyIndex,
                             presentQueueFamilyIndex);
 
-
-        // init depth buffer
+        // 6 init depth buffer
         const vk::Format depthFormat = vk::Format::eD16Unorm;
-        vk::FormatProperties formatProperties =
-                physicalDevice.getFormatProperties(depthFormat);
-
-        vk::ImageTiling tiling;
-        if (formatProperties.linearTilingFeatures &
-            vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
-            tiling = vk::ImageTiling::eLinear;
-        } else if (formatProperties.optimalTilingFeatures &
-                   vk::FormatFeatureFlagBits::eDepthStencilAttachment) {
-            tiling = vk::ImageTiling::eOptimal;
-        } else {
-            throw std::runtime_error("DepthStencilAttachment is not supported "
-                                     "for D16Unorm depth format");
-        }
-        vk::ImageCreateInfo imageCreateInfo(
-                vk::ImageCreateFlags(), vk::ImageType::e2D, depthFormat,
-                vk::Extent3D(surface.extent, 1), 1, 1,
-                vk::SampleCountFlagBits::e1, tiling,
-                vk::ImageUsageFlagBits::eDepthStencilAttachment);
-        vk::UniqueImage depthImage = device->createImageUnique(imageCreateInfo);
-
-        vk::PhysicalDeviceMemoryProperties memoryProperties =
-                physicalDevice.getMemoryProperties();
-        vk::MemoryRequirements memoryRequirements =
-                device->getImageMemoryRequirements(depthImage.get());
-        uint32_t typeBits = memoryRequirements.memoryTypeBits;
-        uint32_t typeIndex = findMemoryType(
-                memoryProperties, memoryRequirements.memoryTypeBits,
-                vk::MemoryPropertyFlagBits::eDeviceLocal);
-        vk::UniqueDeviceMemory depthMemory = device->allocateMemoryUnique(
-                vk::MemoryAllocateInfo(memoryRequirements.size, typeIndex));
-
-        device->bindImageMemory(depthImage.get(), depthMemory.get(), 0);
-
-        vk::ImageSubresourceRange subResourceRange(
-                vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1);
-        vk::UniqueImageView depthView =
-                device->createImageViewUnique(vk::ImageViewCreateInfo(
-                        vk::ImageViewCreateFlags(), depthImage.get(),
-                        vk::ImageViewType::e2D, depthFormat, componentMapping,
-                        subResourceRange));
+        DepthBuffer depthBuffer(physicalDevice, device, depthFormat,
+                                surface.extent);
 
         // init uniform buffer
         Buffer uniformBuffer(physicalDevice, device, sizeof(glm::mat4x4),
