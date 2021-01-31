@@ -716,6 +716,41 @@ bool GLSLtoSPV(const vk::ShaderStageFlagBits shaderStage,
     return true;
 }
 
+vk::UniqueRenderPass createRenderPass(
+        const vk::UniqueDevice &device, vk::Format colorFormat,
+        vk::Format depthFormat,
+        vk::AttachmentLoadOp loadOp = vk::AttachmentLoadOp::eClear,
+        vk::ImageLayout colorFinalLayout = vk::ImageLayout::ePresentSrcKHR) {
+    assert(colorFormat != vk::Format::eUndefined);
+    std::vector<vk::AttachmentDescription> attachmentDescriptions;
+    attachmentDescriptions.emplace_back(
+            vk::AttachmentDescriptionFlags(), colorFormat,
+            vk::SampleCountFlagBits::e1, loadOp, vk::AttachmentStoreOp::eStore,
+            vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare,
+            vk::ImageLayout::eUndefined, colorFinalLayout);
+    if (colorFormat != vk::Format::eUndefined) {
+        attachmentDescriptions.emplace_back(vk::AttachmentDescription(
+                vk::AttachmentDescriptionFlags(), depthFormat,
+                vk::SampleCountFlagBits::e1, loadOp,
+                vk::AttachmentStoreOp::eDontCare,
+                vk::AttachmentLoadOp::eDontCare,
+                vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
+                vk::ImageLayout::eDepthStencilAttachmentOptimal));
+    }
+
+    vk::AttachmentReference colorRef(0,
+                                     vk::ImageLayout::eColorAttachmentOptimal);
+    vk::AttachmentReference depthRef(
+            1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+    vk::SubpassDescription subpass(
+            vk::SubpassDescriptionFlags(), vk::PipelineBindPoint::eGraphics, {},
+            colorRef, {},
+            (depthFormat != vk::Format::eUndefined) ? &depthRef : nullptr);
+
+    return device->createRenderPassUnique(vk::RenderPassCreateInfo(
+            vk::RenderPassCreateFlags(), attachmentDescriptions, subpass));
+}
+
 #pragma endregion
 
 #pragma region
@@ -1053,32 +1088,8 @@ int main() {
                 {});
 
         // 10 init render pass
-        std::array<vk::AttachmentDescription, 2> attachmentDescriptions;
-        attachmentDescriptions[0] = vk::AttachmentDescription(
-                vk::AttachmentDescriptionFlags(), colorFormat,
-                vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
-                vk::AttachmentStoreOp::eStore, vk::AttachmentLoadOp::eDontCare,
-                vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
-                vk::ImageLayout::ePresentSrcKHR);
-        attachmentDescriptions[1] = vk::AttachmentDescription(
-                vk::AttachmentDescriptionFlags(), depthFormat,
-                vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear,
-                vk::AttachmentStoreOp::eDontCare,
-                vk::AttachmentLoadOp::eDontCare,
-                vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined,
-                vk::ImageLayout::eDepthStencilAttachmentOptimal);
-
-        vk::AttachmentReference colorReference(
-                0, vk::ImageLayout::eColorAttachmentOptimal);
-        vk::AttachmentReference depthReference(
-                1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-        vk::SubpassDescription subpass(vk::SubpassDescriptionFlags(),
-                                       vk::PipelineBindPoint::eGraphics, {},
-                                       colorReference, {}, &depthReference);
-
-        vk::UniqueRenderPass renderPass = device->createRenderPassUnique(
-                vk::RenderPassCreateInfo(vk::RenderPassCreateFlags(),
-                                         attachmentDescriptions, subpass));
+        vk::UniqueRenderPass renderPass =
+                createRenderPass(device, swapchain.colorFormat, depthFormat);
 
         // 11 init shader
         glslang::InitializeProcess();
