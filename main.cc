@@ -751,6 +751,27 @@ vk::UniqueRenderPass createRenderPass(
             vk::RenderPassCreateFlags(), attachmentDescriptions, subpass));
 }
 
+std::vector<vk::UniqueFramebuffer> createFramebuffers(
+        const vk::UniqueDevice &device, const vk::UniqueRenderPass &renderPass,
+        const std::vector<vk::UniqueImageView> &imageViews,
+        const vk::UniqueImageView &depthImageView, const vk::Extent2D &extent) {
+    vk::ImageView attachments[2];
+    attachments[1] = depthImageView.get();
+
+    auto framebufferCreateInfo = vk::FramebufferCreateInfo(
+            vk::FramebufferCreateFlags(), *renderPass, depthImageView ? 2 : 1,
+            attachments, extent.width, extent.height, 1);
+
+    std::vector<vk::UniqueFramebuffer> framebuffers;
+    framebuffers.reserve(imageViews.size());
+    for (const auto &view : imageViews) {
+        attachments[0] = view.get();
+        framebuffers.push_back(
+                device->createFramebufferUnique(framebufferCreateInfo));
+    }
+    return framebuffers;
+}
+
 #pragma endregion
 
 #pragma region
@@ -1118,19 +1139,9 @@ int main() {
         glslang::FinalizeProcess();
 
         // 12 init framebuffers
-        std::array<vk::ImageView, 2> attachments;
-        attachments[1] = depthBuffer.imageView.get();
-
-        std::vector<vk::UniqueFramebuffer> framebuffers;
-        framebuffers.reserve(swapchain.imageViews.size());
-        for (const auto &view : swapchain.imageViews) {
-            attachments[0] = view.get();
-            framebuffers.push_back(device->createFramebufferUnique(
-                    vk::FramebufferCreateInfo(vk::FramebufferCreateFlags(),
-                                              renderPass.get(), attachments,
-                                              surface.extent.width,
-                                              surface.extent.height, 1)));
-        }
+        std::vector<vk::UniqueFramebuffer> framebuffers =
+                createFramebuffers(device, renderPass, swapchain.imageViews,
+                                   depthBuffer.imageView, surface.extent);
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
