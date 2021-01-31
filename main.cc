@@ -21,6 +21,8 @@ const char *const kEngineName = "Vulkan";
 const uint32_t kWidth = 64;
 const uint32_t kHeight = 64;
 
+const uint64_t kFenceTimeout = 100000000;
+
 #pragma region classes
 
 struct GlfwContext {
@@ -331,6 +333,12 @@ std::vector<std::string> getInstanceExtensions() {
     std::vector<std::string> extensions;
     extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
     return extensions;
+}
+
+std::vector<std::string> getInstanceLayers() {
+    std::vector<std::string> layers;
+    layers.emplace_back("VK_LAYER_LUNARG_api_dump");
+    return layers;
 }
 
 std::vector<std::string> getDeviceExtensions() {
@@ -772,6 +780,15 @@ std::vector<vk::UniqueFramebuffer> createFramebuffers(
     return framebuffers;
 }
 
+void submitAndWait(const vk::UniqueDevice &device, vk::Queue queue,
+                   vk::UniqueCommandBuffer &commandBuffer) {
+    vk::UniqueFence fence = device->createFenceUnique(vk::FenceCreateInfo());
+    queue.submit(vk::SubmitInfo({}, {}, *commandBuffer), fence.get());
+    while (vk::Result::eTimeout ==
+           device->waitForFences(fence.get(), VK_TRUE, kFenceTimeout))
+        ;
+}
+
 #pragma endregion
 
 #pragma region
@@ -1019,13 +1036,67 @@ DepthBuffer::DepthBuffer(const vk::PhysicalDevice &physicalDevice,
 
 #pragma endregion
 
+#pragma region geometry data
+
+struct VertexPC {
+    float x, y, z, w;// position
+    float r, g, b, a;// color
+};
+
+static const VertexPC coloredCube[] = {
+        // red face
+        {-1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        {-1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        {-1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f},
+        // green face
+        {-1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f},
+        // blue face
+        {-1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f},
+        // yellow face
+        {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+        {1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f},
+        // magenta face
+        {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+        {1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+        {1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+        {-1.0f, 1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f},
+        // cyan face
+        {1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        {1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        {1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+        {-1.0f, -1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f},
+};
+
+#pragma endregion
+
 int main() {
     try {
         static auto glfwCtx = GlfwContext();
 
         vk::UniqueInstance instance =
                 createInstance(kAppName, kEngineName, 1, 1, VK_API_VERSION_1_2,
-                               {}, getInstanceExtensions());
+                               getInstanceLayers(), getInstanceExtensions());
 #ifndef NDEBUG
         vk::UniqueDebugUtilsMessengerEXT debugUtilsMessenger =
                 createDebugUtilsMessenger(instance);
@@ -1142,6 +1213,64 @@ int main() {
         std::vector<vk::UniqueFramebuffer> framebuffers =
                 createFramebuffers(device, renderPass, swapchain.imageViews,
                                    depthBuffer.imageView, surface.extent);
+
+        // 13 init vertex buffer
+        // create a vertex buffer for some vertex and color data
+        vk::UniqueBuffer vertexBuffer =
+                device->createBufferUnique(vk::BufferCreateInfo(
+                        vk::BufferCreateFlags(), sizeof(coloredCube),
+                        vk::BufferUsageFlagBits::eVertexBuffer));
+
+        // allocate device memory for that buffer
+        vk::MemoryRequirements memoryRequirements =
+                device->getBufferMemoryRequirements(vertexBuffer.get());
+        uint32_t memoryTypeIndex = findMemoryType(
+                physicalDevice.getMemoryProperties(),
+                memoryRequirements.memoryTypeBits,
+                vk::MemoryPropertyFlagBits::eHostVisible |
+                        vk::MemoryPropertyFlagBits::eHostCoherent);
+        vk::UniqueDeviceMemory deviceMemory =
+                device->allocateMemoryUnique(vk::MemoryAllocateInfo(
+                        memoryRequirements.size, memoryTypeIndex));
+
+        // copy the vertex and color data into that device memory
+        auto pData = static_cast<uint8_t *>(device->mapMemory(
+                deviceMemory.get(), 0, memoryRequirements.size));
+        memcpy(pData, coloredCube, sizeof(coloredCube));
+        device->unmapMemory(deviceMemory.get());
+
+        // and bind the device memory to the vertex buffer
+        device->bindBufferMemory(vertexBuffer.get(), deviceMemory.get(), 0);
+
+        vk::UniqueSemaphore imageAcquiredSemaphore =
+                device->createSemaphoreUnique(
+                        vk::SemaphoreCreateInfo(vk::SemaphoreCreateFlags()));
+        vk::ResultValue<uint32_t> currentBuffer = device->acquireNextImageKHR(
+                swapchain.swapchain.get(), kFenceTimeout,
+                imageAcquiredSemaphore.get(), nullptr);
+        assert(currentBuffer.result == vk::Result::eSuccess);
+        assert(currentBuffer.value < framebuffers.size());
+
+        std::array<vk::ClearValue, 2> clearValues;
+        clearValues[0].color = vk::ClearColorValue(
+                std::array<float, 4>({{0.2f, 0.2f, 0.2f, 0.2f}}));
+        clearValues[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
+
+        commandBuffer->begin(
+                vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlags()));
+
+        vk::RenderPassBeginInfo renderPassBeginInfo(
+                renderPass.get(), framebuffers[currentBuffer.value].get(),
+                vk::Rect2D(vk::Offset2D(0, 0), surface.extent), clearValues);
+        commandBuffer->beginRenderPass(renderPassBeginInfo,
+                                       vk::SubpassContents::eInline);
+
+        commandBuffer->bindVertexBuffers(0, *vertexBuffer, {0});
+
+        commandBuffer->endRenderPass();
+        commandBuffer->end();
+        vk::Queue graphicsQueue = device->getQueue(graphicsQueueFamilyIndex, 0);
+        submitAndWait(device, graphicsQueue, commandBuffer);
     } catch (vk::SystemError &err) {
         std::cerr << "vk::SystemError: " << err.what() << std::endl;
         exit(EXIT_FAILURE);
